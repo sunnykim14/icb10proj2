@@ -17,11 +17,43 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import re
+import os
+from dotenv import load_dotenv
+
+# 로컬 개발 환경용 .env 파일 로드
+load_dotenv()
+
+# API 키 조회 함수 (1순위: 환경변수/.env, 2순위: Streamlit Secrets)
+def get_naver_api_key(key_name: str) -> str:
+    # 1. 환경 변수 및 .env에서 조회
+    val = os.getenv(key_name)
+    if val:
+        return val
+    # 2. Streamlit Secrets에서 조회
+    try:
+        if key_name in st.secrets:
+            return st.secrets[key_name]
+    except Exception:
+        pass
+    return ""
+
+# ---------- API 키 로드 및 설정 ----------
+default_client_id = get_naver_api_key("NAVER_CLIENT_ID")
+default_client_secret = get_naver_api_key("NAVER_CLIENT_SECRET")
 
 # ---------- 사이드바 입력 ----------
 st.sidebar.title("Naver API 설정")
-client_id = st.sidebar.text_input("Client ID", type="default")
-client_secret = st.sidebar.text_input("Client Secret", type="default")
+# API 키가 설정되어 있으면 입력창에 마스킹 처리(password)를 하여 보안 유지, 비어 있으면 일반 텍스트 입력창 제공
+client_id = st.sidebar.text_input(
+    "Client ID", 
+    value=default_client_id, 
+    type="password" if default_client_id else "default"
+)
+client_secret = st.sidebar.text_input(
+    "Client Secret", 
+    value=default_client_secret, 
+    type="password" if default_client_secret else "default"
+)
 
 st.sidebar.title("검색 옵션")
 keywords_raw = st.sidebar.text_input("검색어 (콤마 구분)", "파이썬, 인공지능")
