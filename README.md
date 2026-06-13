@@ -1,3 +1,24 @@
+# 📈 네이버 API 기반 검색 및 데이터 시각화 대시보드
+
+이 프로젝트는 네이버 OpenAPI(검색 트렌드, 쇼핑, 블로그, 카페, 뉴스 등)를 활용하여 실시간 검색어 트렌드 비교 및 다양한 도메인의 관련 데이터를 인터랙티브하게 분석하고 시각화하는 Streamlit 대시보드 애플리케이션입니다.
+
+## 🚀 Streamlit 배포 주소
+* **웹 서비스 주소**: [네이버 API 대시보드 바로가기](https://icb10proj2-4cwzzzrsrdyag95ceqctcv.streamlit.app/)
+
+## 🛠️ 최근 프로젝트 작업 내역
+* **Streamlit 배포 파일 구성**:
+  * [requirements.txt](./requirements.txt) 설정 (상위 경로 이동 및 의존성 업데이트)
+  * [naver-api-app/Dockerfile](./naver-api-app/Dockerfile) 및 [naver-api-app/compose.yaml](./naver-api-app/compose.yaml) 작성
+  * [naver-api-app/.dockerignore](./naver-api-app/.dockerignore) 및 [naver-api-app/.streamlit/config.toml](./naver-api-app/.streamlit/config.toml) 설정
+* **API 보안 관리 및 수동 입력 고도화**:
+  * 로컬 환경에서 `.env` 파일로 중요 API Key를 보호할 수 있도록 `python-dotenv` 환경 구축 및 가이드용 [.env.example](./.env.example) 파일 추가
+  * Streamlit Cloud 배포 환경용 `st.secrets` 연동 완료
+  * API Key 설정이 없을 때를 대비하여 사이드바를 통한 **수동 입력 지원** 및 보안 마스킹(`type="password"`) 처리 적용
+* **Git 자동화 연동**:
+  * 로컬에서 커밋 시 자동으로 푸시(`git push`)되도록 `.git/hooks/post-commit` 자동화 훅 추가 완료
+
+---
+
 ## STEP 0. 팀 구성 및 협업 환경 세팅
 
 ### 슬랙 세팅
