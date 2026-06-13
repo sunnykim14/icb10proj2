@@ -1,0 +1,12 @@
+# Docker Compose 설정 파일
+services:
+  streamlit-app:
+    # 현재 디렉토리의 Dockerfile을 기반으로 빌드
+    build: .
+    # 컨테이너 이름 설정
+    container_name: naver-api-dashboard
+    # 호스트 8501 포트와 컨테이너 8501 포트 포워딩
+    ports:
+      - "8501:8501"
+    # 컨테이너 종료 시 자동 재시작 정책
+    restart: always

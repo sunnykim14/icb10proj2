@@ -1,0 +1,20 @@
+# 가상환경 및 캐시 파일 제외
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 로컬 개발 및 빌드 설정 파일 제외
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+compose.yaml
+docker-compose.yml
+
+# 로컬 테스트용 문서 및 기타 무시할 파일
+.idea/
+.vscode/
+*.bat

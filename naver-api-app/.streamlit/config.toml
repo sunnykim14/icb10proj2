@@ -1,0 +1,21 @@
+# Streamlit 설정 파일
+
+[server]
+# 실행 포트 설정 (기본값: 8501)
+port = 8501
+# 외부 접속 허용 주소
+address = "0.0.0.0"
+# 브라우저 자동 실행 여부 (배포 환경에서는 false)
+headless = true
+# CORS 보호 비활성화 (배포 환경에서 프록시 서버 연동 시 필요할 수 있음)
+enableCORS = false
+# XSRF 보호 비활성화
+enableXsrfProtection = false
+
+[theme]
+# 네이버 브랜드 상징색인 그린 컬러 적용
+primaryColor = "#00c73c"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#31333F"
+font = "sans serif"
