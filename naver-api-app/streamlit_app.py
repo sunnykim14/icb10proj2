@@ -1,13 +1,14 @@
 """
 네이버 검색 API를 활용한 Streamlit 대시보드 애플리케이션
-Naver API를 활용한 검색 및 데이터 시각화
+Naver API를 활용한 검색 및 데이터 시각화 고도화 버전
 
-주요 기능:
-- 왼쪽 사이드바에서 API 키(Client ID, Client Secret) 입력
-- 검색어를 콤마(',') 로 구분하여 입력
-- 시작일·종료일을 선택 (디폴트 최근 7일)
-- 페이지 선택: 검색어 트렌드, 쇼핑, 블로그, 카페, 뉴스, 쇼핑 트렌드
-각 페이지는 해당 API를 호출하고 결과를 표와 간단 차트로 보여줍니다.
+주요 개선 기능:
+- API 캐싱 기능 추가 (st.cache_data를 이용한 1시간 캐싱 적용)
+- 분석 실행 제어 도입 (사이드바의 "분석 실행" 버튼 클릭 시에만 API 호출)
+- 캐시 강제 새로고침 기능 지원 ("캐시 초기화" 버튼)
+- 로컬 환경 (.env 파일) 및 배포 환경 (st.secrets) API 키 우선순위 바인딩
+- 수동 API 키 입력 지원 및 마스킹(type="password") 보안 강화
+- 검색 도메인별 데이터 획득 함수 모듈화 (순수 검색 인자 기반 캐싱 최적화)
 """
 
 import streamlit as st
@@ -43,7 +44,6 @@ default_client_secret = get_naver_api_key("NAVER_CLIENT_SECRET")
 
 # ---------- 사이드바 입력 ----------
 st.sidebar.title("Naver API 설정")
-# API 키가 설정되어 있으면 입력창에 마스킹 처리(password)를 하여 보안 유지, 비어 있으면 일반 텍스트 입력창 제공
 client_id = st.sidebar.text_input(
     "Client ID", 
     value=default_client_id, 
@@ -75,43 +75,18 @@ def _headers():
     }
 
 def _parse_keywords(raw: str):
-    return [kw.strip() for kw in raw.split(",") if kw.strip()]
-
-def _request_get(url, params):
-    try:
-        resp = requests.get(url, headers=_headers(), params=params, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        st.error(f"요청 실패: {e}")
-        return None
-
-def _request_post(url, json_body):
-    try:
-        resp = requests.post(url, headers=_headers(), json=json_body, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        st.error(f"요청 실패: {e}")
-        return None
+    return tuple([kw.strip() for kw in raw.split(",") if kw.strip()])
 
 def clean_html(text):
     if not isinstance(text, str):
         return text
     return re.sub(r'<[^>]*>', '', text)
 
-# ---------- 페이지 구현 ----------
-keywords = _parse_keywords(keywords_raw)
-if not client_id or not client_secret:
-    st.warning("API 키를 입력해주세요.")
-    st.stop()
-if not keywords:
-    st.warning("검색어를 입력해주세요.")
-    st.stop()
+# ---------- 캐싱 처리된 API 호출 모듈화 함수들 ----------
+# API 요청 실패 시 캐시가 오염되는 것을 막기 위해 st.error를 출력하는 대신 raise_for_status()로 예외를 발생시키고 상위에서 핸들링합니다.
 
-if page == "검색어 트렌드":
-    st.header("📈 네이버 검색어 트렌드 (데이터랩)")
-    st.markdown("입력한 검색어들의 네이버 검색 트렌드를 비교 분석합니다. 가장 검색량이 높았던 시점을 100으로 설정한 상대값입니다.")
+@st.cache_data(ttl=3600)
+def fetch_keyword_trend(keywords_tuple: tuple, start_date, end_date):
     url = "https://openapi.naver.com/v1/datalab/search"
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
@@ -119,12 +94,142 @@ if page == "검색어 트렌드":
         "startDate": start_str,
         "endDate": end_str,
         "timeUnit": "date",
-        "keywordGroups": [{"groupName": kw, "keywords": [kw]} for kw in keywords],
+        "keywordGroups": [{"groupName": kw, "keywords": [kw]} for kw in keywords_tuple],
         "device": "pc",
     }
-    with st.spinner("데이터 분석 중..."):
-        data = _request_post(url, body)
+    resp = requests.post(url, headers=_headers(), json=body, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+@st.cache_data(ttl=3600)
+def fetch_shopping_data(keywords_tuple: tuple):
+    base_url = "https://openapi.naver.com/v1/search/shop"
+    all_items = []
+    for kw in keywords_tuple:
+        params = {"query": kw, "display": 30, "start": 1, "sort": "sim"}
+        resp = requests.get(base_url, headers=_headers(), params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if data:
+            for item in data.get("items", []):
+                item['search_keyword'] = kw
+                all_items.append(item)
+    return all_items
+
+@st.cache_data(ttl=3600)
+def fetch_blog_data(keywords_tuple: tuple):
+    base_url = "https://openapi.naver.com/v1/search/blog"
+    all_blogs = []
+    for kw in keywords_tuple:
+        params = {"query": kw, "display": 30, "start": 1, "sort": "sim"}
+        resp = requests.get(base_url, headers=_headers(), params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if data:
+            for item in data.get("items", []):
+                item['search_keyword'] = kw
+                all_blogs.append(item)
+    return all_blogs
+
+@st.cache_data(ttl=3600)
+def fetch_cafe_data(keywords_tuple: tuple):
+    base_url = "https://openapi.naver.com/v1/search/cafearticle"
+    all_cafes = []
+    for kw in keywords_tuple:
+        params = {"query": kw, "display": 30, "start": 1, "sort": "sim"}
+        resp = requests.get(base_url, headers=_headers(), params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if data:
+            for item in data.get("items", []):
+                item['search_keyword'] = kw
+                all_cafes.append(item)
+    return all_cafes
+
+@st.cache_data(ttl=3600)
+def fetch_news_data(keywords_tuple: tuple):
+    base_url = "https://openapi.naver.com/v1/search/news"
+    all_news = []
+    for kw in keywords_tuple:
+        params = {"query": kw, "display": 50, "start": 1, "sort": "sim"}
+        resp = requests.get(base_url, headers=_headers(), params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if data:
+            for item in data.get("items", []):
+                item['search_keyword'] = kw
+                all_news.append(item)
+    return all_news
+
+
+# ---------- API 호출 버튼 제어 및 세션 관리 ----------
+st.sidebar.markdown("---")
+st.sidebar.subheader("데이터 업데이트")
+
+# 세션 상태 변수 초기화
+if "run_analysis" not in st.session_state:
+    st.session_state.run_analysis = False
+if "last_keywords" not in st.session_state:
+    st.session_state.last_keywords = None
+if "last_start_date" not in st.session_state:
+    st.session_state.last_start_date = None
+if "last_end_date" not in st.session_state:
+    st.session_state.last_end_date = None
+
+keywords = _parse_keywords(keywords_raw)
+
+# 버튼 두 개 배치 (분석 실행 및 캐시 초기화)
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    if st.button("🔍 분석 실행", use_container_width=True):
+        if not client_id or not client_secret:
+            st.sidebar.error("API 키를 먼저 입력해주세요.")
+        elif not keywords:
+            st.sidebar.error("검색어를 입력해주세요.")
+        else:
+            st.session_state.run_analysis = True
+            st.session_state.last_keywords = keywords
+            st.session_state.last_start_date = start_date
+            st.session_state.last_end_date = end_date
+with col2:
+    if st.button("🔄 캐시 초기화", use_container_width=True):
+        st.cache_data.clear()
+        st.sidebar.success("캐시 초기화 완료!")
+        st.rerun()
+
+
+# ---------- 메인 분석 로직 ----------
+if not client_id or not client_secret:
+    st.warning("API 키(Client ID, Client Secret)를 입력해주세요.")
+    st.info("💡 사이드바에서 수동으로 입력하거나 로컬 환경의 `.env` 또는 배포 설정에 등록할 수 있습니다.")
+    st.stop()
+
+if not keywords:
+    st.warning("검색어를 입력해주세요.")
+    st.stop()
+
+# 사용자가 아직 한 번도 분석 버튼을 누르지 않은 상태일 경우 안내
+if not st.session_state.run_analysis:
+    st.info("👈 왼쪽 사이드바에서 검색 옵션을 설정한 뒤 **[🔍 분석 실행]** 버튼을 눌러 시각화 분석을 기동하세요.")
+    st.stop()
+
+# 실행에 사용할 검색 옵션 바인딩
+run_kws = st.session_state.last_keywords
+run_start = st.session_state.last_start_date
+run_end = st.session_state.last_end_date
+
+# 각 페이지 렌더링 시작
+if page == "검색어 트렌드":
+    st.header("📈 네이버 검색어 트렌드 (데이터랩)")
+    st.markdown("입력한 검색어들의 네이버 검색 트렌드를 비교 분석합니다. 가장 검색량이 높았던 시점을 100으로 설정한 상대값입니다.")
     
+    with st.spinner("네이버 데이터랩 트렌드를 분석 중..."):
+        try:
+            data = fetch_keyword_trend(run_kws, run_start, run_end)
+        except Exception as e:
+            st.error(f"데이터 수집에 실패했습니다. (API 설정 및 네트워크 상태 확인 필요): {e}")
+            data = None
+            
     if data:
         all_data = []
         for grp in data.get("results", []):
@@ -159,17 +264,13 @@ if page == "검색어 트렌드":
 
 elif page == "쇼핑":
     st.header("🛍️ 네이버 쇼핑 검색 및 가격 분석")
-    base_url = "https://openapi.naver.com/v1/search/shop"
     
-    all_items = []
     with st.spinner("쇼핑 데이터를 수집하고 분석하는 중..."):
-        for kw in keywords:
-            params = {"query": kw, "display": 30, "start": 1, "sort": "sim"}
-            data = _request_get(base_url, params)
-            if data:
-                for item in data.get("items", []):
-                    item['search_keyword'] = kw
-                    all_items.append(item)
+        try:
+            all_items = fetch_shopping_data(run_kws)
+        except Exception as e:
+            st.error(f"쇼핑 데이터 수집 실패: {e}")
+            all_items = []
                     
     if all_items:
         df = pd.DataFrame(all_items)
@@ -224,17 +325,13 @@ elif page == "쇼핑":
 
 elif page == "블로그":
     st.header("📝 네이버 블로그 검색 및 포스팅 분석")
-    base_url = "https://openapi.naver.com/v1/search/blog"
     
-    all_blogs = []
     with st.spinner("블로그 포스팅 수집 중..."):
-        for kw in keywords:
-            params = {"query": kw, "display": 30, "start": 1, "sort": "sim"}
-            data = _request_get(base_url, params)
-            if data:
-                for item in data.get("items", []):
-                    item['search_keyword'] = kw
-                    all_blogs.append(item)
+        try:
+            all_blogs = fetch_blog_data(run_kws)
+        except Exception as e:
+            st.error(f"블로그 데이터 수집 실패: {e}")
+            all_blogs = []
                     
     if all_blogs:
         df = pd.DataFrame(all_blogs)
@@ -264,17 +361,13 @@ elif page == "블로그":
 
 elif page == "카페":
     st.header("☕ 네이버 카페글 검색 및 커뮤니티 분석")
-    base_url = "https://openapi.naver.com/v1/search/cafearticle"
     
-    all_cafes = []
     with st.spinner("카페 포스팅 수집 중..."):
-        for kw in keywords:
-            params = {"query": kw, "display": 30, "start": 1, "sort": "sim"}
-            data = _request_get(base_url, params)
-            if data:
-                for item in data.get("items", []):
-                    item['search_keyword'] = kw
-                    all_cafes.append(item)
+        try:
+            all_cafes = fetch_cafe_data(run_kws)
+        except Exception as e:
+            st.error(f"카페 데이터 수집 실패: {e}")
+            all_cafes = []
                     
     if all_cafes:
         df = pd.DataFrame(all_cafes)
@@ -302,29 +395,24 @@ elif page == "카페":
 
 elif page == "뉴스":
     st.header("📰 네이버 뉴스 검색 및 미디어 분석")
-    base_url = "https://openapi.naver.com/v1/search/news"
     
-    all_news = []
     with st.spinner("최신 뉴스 수집 중..."):
-        for kw in keywords:
-            params = {"query": kw, "display": 50, "start": 1, "sort": "sim"}
-            data = _request_get(base_url, params)
-            if data:
-                for item in data.get("items", []):
-                    item['search_keyword'] = kw
-                    all_news.append(item)
+        try:
+            all_news = fetch_news_data(run_kws)
+        except Exception as e:
+            st.error(f"뉴스 데이터 수집 실패: {e}")
+            all_news = []
                     
     if all_news:
         df = pd.DataFrame(all_news)
         df['title'] = df['title'].apply(clean_html)
         df['description'] = df['description'].apply(clean_html)
         
-        # Extract publisher / media from URL or API (Actually Naver news returns URL, let's extract domain)
+        # Extract publisher / media from URL or API
         def get_media_name(link):
             match = re.search(r'https?://(?:www\.)?([^/]+)', link)
             if match:
                 domain = match.group(1)
-                # Map common Korean news portals
                 portal_map = {
                     'news.naver.com': '네이버뉴스',
                     'daum.net': '다음뉴스',
@@ -372,18 +460,14 @@ elif page == "뉴스":
 elif page == "쇼핑 트렌드":
     st.header("📊 네이버 쇼핑 트렌드 비교 (데이터랩)")
     st.markdown("쇼핑 영역에서의 검색 키워드 인기도 및 트렌드 추이를 분석하여 비교합니다.")
-    url = "https://openapi.naver.com/v1/datalab/search"
-    start_str = start_date.strftime("%Y-%m-%d")
-    end_str = end_date.strftime("%Y-%m-%d")
-    body = {
-        "startDate": start_str,
-        "endDate": end_str,
-        "timeUnit": "date",
-        "keywordGroups": [{"groupName": kw, "keywords": [kw]} for kw in keywords],
-        "device": "pc",
-    }
+    
     with st.spinner("쇼핑 트렌드 분석 중..."):
-        data = _request_post(url, body)
+        try:
+            # 트렌드 조회의 경우 기존 데이터랩 함수를 공통 사용
+            data = fetch_keyword_trend(run_kws, run_start, run_end)
+        except Exception as e:
+            st.error(f"쇼핑 트렌드 수집 실패: {e}")
+            data = None
         
     if data:
         all_data = []
@@ -423,4 +507,4 @@ else:
     st.error("지원되지 않는 페이지입니다.")
 
 # ---------- 실행 안내 ----------
-st.caption("제작 및 배포: 네이버 API 기반 대시보드 - Plotly 시각화 적용 고도화 버전")
+st.caption("제작 및 배포: 네이버 API 기반 대시보드 - 캐싱 및 실행 제어 최적화 고도화 버전")
